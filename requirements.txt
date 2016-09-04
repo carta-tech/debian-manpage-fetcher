@@ -2,3 +2,4 @@ chardet==2.3.0
 python-debian==0.1.28
 requests==2.11.1
 six==1.10.0
+yapf==0.11.1
