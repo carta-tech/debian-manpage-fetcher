@@ -6,7 +6,6 @@ import gzip
 import pickle
 from collections import namedtuple
 from debian import deb822, debfile
-import requests
 from tempfile import mkstemp
 from queue import Queue
 from threading import Thread
@@ -30,41 +29,15 @@ class DebianRepo(object):
     cache_dir = pjoin(package_dir, "cache")
     cache_file = pjoin(cache_dir, "package-cache")
 
-    contents_file = pjoin(cache_dir, "Contents")
-    packages_file = pjoin(cache_dir, "Packages")
-
-    base_url = "http://httpredir.debian.org/debian/"
-    contents_url = base_url + "dists/jessie/main/Contents-i386.gz"
-    packages_url = base_url + "dists/jessie/main/binary-i386/Packages.gz"
+    base_mirror_path = "/mirror/mirror/mirrors.kernel.org/debian"
+    contents_file = pjoin(base_mirror_path,"dists/stable/main/Contents-i386.gz")
+    packages_file = pjoin(base_mirror_path,"dists/stable/main/binary-i386/Packages.gz")
 
     @staticmethod
     def create_cache_dir():
         if not os.path.isdir(DebianRepo.cache_dir):
             logging.debug("Creating non existing cache directory")
             os.makedirs(DebianRepo.cache_dir)
-
-    @staticmethod
-    def update():
-        logging.info("Fetching updated Packages and Contents files")
-        DebianRepo.create_cache_dir()
-
-        logging.info("Fetching contents file")
-        if os.path.isfile(DebianRepo.contents_file):
-            logging.debug("Removing old copy of contents file")
-            os.unlink(DebianRepo.contents_file)
-
-        req = urlopen(DebianRepo.contents_url)
-        with open(DebianRepo.contents_file, 'wb') as fp:
-            shutil.copyfileobj(req, fp)
-
-        logging.info("Fetching packages file")
-        if os.path.isfile(DebianRepo.packages_file):
-            logging.debug("Removing old copy of packages file")
-            os.unlink(DebianRepo.packages_file)
-
-        req = urlopen(DebianRepo.packages_url)
-        with open(DebianRepo.packages_file, 'wb') as fp:
-            shutil.copyfileobj(req, fp)
 
     @staticmethod
     def rebuild_cache():
@@ -190,7 +163,6 @@ class DebianPackage(dict):
 
 class DebianManpageFetcher(object):
     output_dir = pjoin(package_dir, "output")
-    base_url = "http://httpredir.debian.org/debian/"
 
     packages = None
 
@@ -221,7 +193,7 @@ class DebianManpageFetcher(object):
             os.makedirs(DebianManpageFetcher.output_dir)
 
         q = Queue(maxsize=0)
-        num_threads = 50
+        num_threads = 5
 
         for i in range(num_threads):
             worker = Thread(target=DebianManpageFetcher.process_package, args=(q, ))
@@ -261,17 +233,10 @@ class DebianManpageFetcher(object):
         if cp['flushed']:
             return True
 
-        url = DebianManpageFetcher.base_url + cp['url']
-        response = requests.get(url, stream = True)
-
-        _, tmpfile = mkstemp()
-
-        fp = open(tmpfile, 'wb')
-        fp.write(response.content)
-        fp.close()
+        file = pjoin(DebianRepo.base_mirror_path,cp['url'])
 
         try:
-            data_file = debfile.DebFile(tmpfile).data
+            data_file = debfile.DebFile(file).data
         except:
             print("Error processing (A) {}".format(package))
             os.unlink(tmpfile)
@@ -310,8 +275,6 @@ class DebianManpageFetcher(object):
             v['state'] = 1
         else:
             cp['flushed'] = True
-
-        os.unlink(tmpfile)
 
 # Helper functions
 def manpage_name(file):
@@ -362,16 +325,12 @@ def fetchone(args):
     DebianManpageFetcher.fetchone(args.package)
 
 
-def update(args):
-    DebianRepo.update()
+def update_cache(args):
+    DebianRepo.update_cache()
 
 
 def rebuild_cache(args):
     DebianRepo.rebuild_cache()
-
-
-def update_cache(args):
-    DebianRepo.update_cache()
 
 
 if __name__ == '__main__':
@@ -383,13 +342,6 @@ if __name__ == '__main__':
     parser.add_argument("--log-level", help="choose log level")
 
     subparsers = parser.add_subparsers()
-
-    # update option
-    parser_update = subparsers.add_parser(
-        'update',
-        help='Updates Packages and Contents',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser_update.set_defaults(func=update)
 
     # rebuild_cache option
     parser_rebuild_cache = subparsers.add_parser(
